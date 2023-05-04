@@ -39,7 +39,6 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 	//CallExample()
 	keepFlag := true
 	for keepFlag {
-
 		task := GetTask()
 		switch task.TaskType {
 		case MapTask:
@@ -68,7 +67,6 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 				fmt.Println("All tasks are Done ,will be exiting...")
 				keepFlag = false
 			}
-
 		}
 	}
 
