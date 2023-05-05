@@ -4,7 +4,10 @@ package shardctrler
 // Shardctrler clerk.
 //
 
-import "6.824/labrpc"
+import (
+	"6.824/labrpc"
+	mathrand "math/rand"
+)
 import "time"
 import "crypto/rand"
 import "math/big"
@@ -12,6 +15,9 @@ import "math/big"
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// Your data here.
+	seqId    int
+	leaderId int // 确定哪个服务器是leader，下次直接发送给该服务器
+	clientId int64
 }
 
 func nrand() int64 {
@@ -24,78 +30,118 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
+
 	// Your code here.
+	ck.clientId = nrand()
+	ck.leaderId = mathrand.Intn(len(ck.servers))
 	return ck
 }
 
 func (ck *Clerk) Query(num int) Config {
-	args := &QueryArgs{}
+
 	// Your code here.
-	args.Num = num
+	ck.seqId++
+	args := QueryArgs{Num: num, ClientId: ck.clientId, SeqId: ck.seqId}
+	serverId := ck.leaderId
 	for {
-		// try each known server.
-		for _, srv := range ck.servers {
-			var reply QueryReply
-			ok := srv.Call("ShardCtrler.Query", args, &reply)
-			if ok && reply.WrongLeader == false {
+
+		reply := QueryReply{}
+		//fmt.Printf("[ ++++Client[%v]++++] : send a Query,args:%+v,serverId[%v]\n", ck.clientId, args, serverId)
+		ok := ck.servers[serverId].Call("ShardCtrler.Query", &args, &reply)
+
+		if ok {
+			if reply.Err == OK {
+				ck.leaderId = serverId
 				return reply.Config
+			} else if reply.Err == ErrWrongLeader {
+				serverId = (serverId + 1) % len(ck.servers)
+				continue
 			}
 		}
+
+		// 节点发生crash等原因
+		serverId = (serverId + 1) % len(ck.servers)
 		time.Sleep(100 * time.Millisecond)
 	}
+
 }
 
 func (ck *Clerk) Join(servers map[int][]string) {
-	args := &JoinArgs{}
 	// Your code here.
-	args.Servers = servers
-
+	ck.seqId++
+	args := JoinArgs{Servers: servers, ClientId: ck.clientId, SeqId: ck.seqId}
+	serverId := ck.leaderId
 	for {
-		// try each known server.
-		for _, srv := range ck.servers {
-			var reply JoinReply
-			ok := srv.Call("ShardCtrler.Join", args, &reply)
-			if ok && reply.WrongLeader == false {
+
+		reply := JoinReply{}
+		//fmt.Printf("[ ++++Client[%v]++++] : send a Join,args:%+v,serverId[%v]\n", ck.clientId, args, serverId)
+		ok := ck.servers[serverId].Call("ShardCtrler.Join", &args, &reply)
+
+		if ok {
+			if reply.Err == OK {
+				ck.leaderId = serverId
 				return
+			} else if reply.Err == ErrWrongLeader {
+				serverId = (serverId + 1) % len(ck.servers)
+				continue
 			}
 		}
+
+		// 节点发生crash等原因
+		serverId = (serverId + 1) % len(ck.servers)
 		time.Sleep(100 * time.Millisecond)
 	}
+
 }
 
 func (ck *Clerk) Leave(gids []int) {
-	args := &LeaveArgs{}
-	// Your code here.
-	args.GIDs = gids
-
+	ck.seqId++
+	args := LeaveArgs{GIDs: gids, ClientId: ck.clientId, SeqId: ck.seqId}
+	serverId := ck.leaderId
 	for {
-		// try each known server.
-		for _, srv := range ck.servers {
-			var reply LeaveReply
-			ok := srv.Call("ShardCtrler.Leave", args, &reply)
-			if ok && reply.WrongLeader == false {
+
+		reply := JoinReply{}
+		//fmt.Printf("[ ++++Client[%v]++++] : send a Join,args:%+v,serverId[%v]\n", ck.clientId, args, serverId)
+		ok := ck.servers[serverId].Call("ShardCtrler.Leave", &args, &reply)
+
+		if ok {
+			if reply.Err == OK {
+				ck.leaderId = serverId
 				return
+			} else if reply.Err == ErrWrongLeader {
+				serverId = (serverId + 1) % len(ck.servers)
+				continue
 			}
 		}
+
+		// 节点发生crash等原因
+		serverId = (serverId + 1) % len(ck.servers)
 		time.Sleep(100 * time.Millisecond)
 	}
 }
 
 func (ck *Clerk) Move(shard int, gid int) {
-	args := &MoveArgs{}
-	// Your code here.
-	args.Shard = shard
-	args.GID = gid
-
+	ck.seqId++
+	args := MoveArgs{Shard: shard, GID: gid, ClientId: ck.clientId, SeqId: ck.seqId}
+	serverId := ck.leaderId
 	for {
-		// try each known server.
-		for _, srv := range ck.servers {
-			var reply MoveReply
-			ok := srv.Call("ShardCtrler.Move", args, &reply)
-			if ok && reply.WrongLeader == false {
+
+		reply := JoinReply{}
+		//fmt.Printf("[ ++++Client[%v]++++] : send a Move,args:%+v,serverId[%v]\n", ck.clientId, args, serverId)
+		ok := ck.servers[serverId].Call("ShardCtrler.Move", &args, &reply)
+
+		if ok {
+			if reply.Err == OK {
+				ck.leaderId = serverId
 				return
+			} else if reply.Err == ErrWrongLeader {
+				serverId = (serverId + 1) % len(ck.servers)
+				continue
 			}
 		}
+
+		// 节点发生crash等原因
+		serverId = (serverId + 1) % len(ck.servers)
 		time.Sleep(100 * time.Millisecond)
 	}
 }

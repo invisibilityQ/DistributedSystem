@@ -7,10 +7,10 @@ package shardctrler
 // Join(servers) -- add a set of groups (gid -> server-list mapping).
 // Leave(gids) -- delete a set of groups.
 // Move(shard, gid) -- hand off one shard from current owner to gid.
-// Query(num) -> fetch Config # num, or latest config if num==-1.
+// Query(num) -> fetch UpConfig # num, or latest config if num==-1.
 //
-// A Config (configuration) describes a set of replica groups, and the
-// replica group responsible for each shard. Configs are numbered. Config
+// A UpConfig (configuration) describes a set of replica groups, and the
+// replica group responsible for each shard. Configs are numbered. UpConfig
 // #0 is the initial configuration, with no groups and all shards
 // assigned to group 0 (the invalid group).
 //
@@ -20,8 +20,9 @@ package shardctrler
 // The number of shards.
 const NShards = 10
 
-// A configuration -- an assignment of shards to groups.
+// Config A configuration -- an assignment of shards to groups.
 // Please don't change this.
+// 最多有10个分片
 type Config struct {
 	Num    int              // config number
 	Shards [NShards]int     // shard -> gid
@@ -29,13 +30,16 @@ type Config struct {
 }
 
 const (
-	OK = "OK"
+	OK             = "OK"
+	ErrWrongLeader = "ErrWrongLeader"
 )
 
 type Err string
 
 type JoinArgs struct {
-	Servers map[int][]string // new GID -> servers mappings
+	Servers  map[int][]string // new GID -> servers mappings
+	SeqId    int
+	ClientId int64
 }
 
 type JoinReply struct {
@@ -44,7 +48,9 @@ type JoinReply struct {
 }
 
 type LeaveArgs struct {
-	GIDs []int
+	GIDs     []int
+	SeqId    int
+	ClientId int64
 }
 
 type LeaveReply struct {
@@ -53,8 +59,10 @@ type LeaveReply struct {
 }
 
 type MoveArgs struct {
-	Shard int
-	GID   int
+	Shard    int
+	GID      int
+	SeqId    int
+	ClientId int64
 }
 
 type MoveReply struct {
@@ -63,7 +71,9 @@ type MoveReply struct {
 }
 
 type QueryArgs struct {
-	Num int // desired config number
+	Num      int // desired config number
+	SeqId    int
+	ClientId int64
 }
 
 type QueryReply struct {
