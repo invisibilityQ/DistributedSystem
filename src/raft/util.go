@@ -1,134 +1,96 @@
 package raft
 
 import (
-	"fmt"
 	"log"
 	"math/rand"
-	"os"
-	"strconv"
 	"time"
 )
 
-const (
-	// special NULL value for voteFor
-	voteForNull = -1
-	// election timeout range, in millisecond
-	electionTimeoutMax = 1600
-	electionTimeoutMin = 800
-	// heartbeat interval, in millisecond (10 heartbeat RPCs per second)
-	// heartbeat interval should be one order less than election timeout
-	heartbeatInterval = 100
-)
+// Debugging
+const Debug = false
 
-type serverState string
+//const Debug = true
 
-const (
-	Leader    serverState = "L"
-	Candidate serverState = "C"
-	Follower  serverState = "F"
-)
-
-// set normal election timeout, with randomness
-func nextElectionAlarm() time.Time {
-	return time.Now().Add(time.Duration(randRange(electionTimeoutMin, electionTimeoutMax)) * time.Millisecond)
-}
-
-// set fast election timeout on startup, with randomness
-func initElectionAlarm() time.Time {
-	return time.Now().Add(time.Duration(randRange(0, electionTimeoutMax-electionTimeoutMin)) * time.Millisecond)
-}
-
-// actual intention name of AppendEntries RPC call
-func intentOfAppendEntriesRPC(args *AppendEntriesArgs) string {
-	if len(args.Entries) == 0 {
-		return "HB"
-	}
-	return "AE"
-}
-
-func dTopicOfAppendEntriesRPC(args *AppendEntriesArgs, defaultTopic logTopic) logTopic {
-	if len(args.Entries) == 0 {
-		return dHeart
-	}
-	return defaultTopic
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// random range
-func randRange(from, to int) int {
-	return rand.Intn(to-from) + from
-}
-
-// Retrieve the verbosity level from an environment variable
-// ref: https://blog.josejg.com/debugging-pretty/
-func getVerbosity() int {
-	v := os.Getenv("VERBOSE")
-	level := 0
-	if v != "" {
-		var err error
-		level, err = strconv.Atoi(v)
-		if err != nil {
-			log.Fatalf("Invalid verbosity %v", v)
-		}
-	}
-	return level
-}
-
-type logTopic string
-
-const (
-	dClient  logTopic = "CLNT"
-	dCommit  logTopic = "CMIT"
-	dDrop    logTopic = "DROP"
-	dError   logTopic = "ERRO"
-	dInfo    logTopic = "INFO"
-	dLeader  logTopic = "LEAD"
-	dLog     logTopic = "LOG1"
-	dLog2    logTopic = "LOG2"
-	dPersist logTopic = "PERS"
-	dSnap    logTopic = "SNAP"
-	dTerm    logTopic = "TERM"
-	dTest    logTopic = "TEST"
-	dTimer   logTopic = "TIMR"
-	dTrace   logTopic = "TRCE"
-	dVote    logTopic = "VOTE"
-	dWarn    logTopic = "WARN"
-	dConfig  logTopic = "CONF"
-	dHeart   logTopic = "HART"
-)
-
-var debugStart time.Time
-var debugVerbosity int
-
-func init() {
-	debugVerbosity = getVerbosity()
-	debugStart = time.Now()
-	// disable datetime logging
-	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
-}
-
-func Debug(rf *Raft, topic logTopic, format string, a ...interface{}) {
-	if debugVerbosity >= 1 {
-		time := time.Since(debugStart).Microseconds()
-		time /= 100
-		prefix := fmt.Sprintf("%06d %v ", time, string(topic))
-		if rf != nil {
-			prefix += fmt.Sprintf("S%d ", rf.me)
-		}
-		format = prefix + format
+func DPrintf(format string, a ...interface{}) (n int, err error) {
+	if Debug {
 		log.Printf(format, a...)
 	}
+	return
+}
+
+// 最小值min
+func min(num int, num1 int) int {
+	if num > num1 {
+		return num1
+	} else {
+		return num
+	}
+}
+
+// 通过不同的随机种子生成不同的过期时间
+func generateOverTime(server int64) int {
+	rand.Seed(time.Now().Unix() + server)
+	return rand.Intn(MoreVoteTime) + MinVoteTime
+}
+
+// UpToDate paper中投票RPC的rule2
+func (rf *Raft) UpToDate(index int, term int) bool {
+	lastIndex := rf.getLastIndex()
+	lastTerm := rf.getLastTerm()
+	return term > lastTerm || (term == lastTerm && index >= lastIndex)
+}
+
+// 通过快照偏移还原真实日志条目
+func (rf *Raft) restoreLog(curIndex int) LogEntry {
+	return rf.logs[curIndex-rf.lastIncludeIndex]
+}
+
+// 通过快照偏移还原真实日志任期
+func (rf *Raft) restoreLogTerm(curIndex int) int {
+	// 如果当前index与快照一致/日志为空，直接返回快照/快照初始化信息，否则根据快照计算
+	if curIndex-rf.lastIncludeIndex == 0 {
+		return rf.lastIncludeTerm
+	}
+	//fmt.Printf("[GET] curIndex:%v,rf.lastIncludeIndex:%v\n", curIndex, rf.lastIncludeIndex)
+	return rf.logs[curIndex-rf.lastIncludeIndex].Term
+}
+
+// 获取最后的快照日志下标(代表已存储）
+func (rf *Raft) getLastIndex() int {
+	return len(rf.logs) - 1 + rf.lastIncludeIndex
+}
+
+// 获取最后的任期(快照版本
+func (rf *Raft) getLastTerm() int {
+	// 因为初始有填充一个，否则最直接len == 0
+	if len(rf.logs)-1 == 0 {
+		return rf.lastIncludeTerm
+	} else {
+		return rf.logs[len(rf.logs)-1].Term
+	}
+}
+
+// 通过快照偏移还原真实PrevLogInfo
+func (rf *Raft) getPrevLogInfo(server int) (int, int) {
+	newEntryBeginIndex := rf.nextIndex[server] - 1
+	lastIndex := rf.getLastIndex()
+	if newEntryBeginIndex == lastIndex+1 {
+		newEntryBeginIndex = lastIndex
+	}
+	return newEntryBeginIndex, rf.restoreLogTerm(newEntryBeginIndex)
+}
+
+func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
+	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+	return ok
+}
+
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	return ok
+}
+
+func (rf *Raft) sendSnapShot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
+	ok := rf.peers[server].Call("Raft.InstallSnapShot", args, reply)
+	return ok
 }
